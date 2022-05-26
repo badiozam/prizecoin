@@ -744,7 +744,7 @@ int V1TransportDeserializer::readHeader(Span<const uint8_t> msg_bytes)
 
     // Check start string, network magic
     if (memcmp(hdr.pchMessageStart, m_chain_params.MessageStart(), CMessageHeader::MESSAGE_START_SIZE) != 0) {
-        LogPrint(BCLog::NET, "Header error: Wrong MessageStart %s received, peer=%d\n", HexStr(hdr.pchMessageStart), m_node_id);
+        LogPrint(BCLog::NET, "Header error: Wrong MessageStart %s received, peer=%d (should be %s)\n", HexStr(hdr.pchMessageStart), m_node_id, HexStr(m_chain_params.MessageStart()));
         return -1;
     }
 

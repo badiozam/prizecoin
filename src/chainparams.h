@@ -24,7 +24,7 @@ struct CCheckpointData {
 
     int GetHeight() const {
         const auto& final_checkpoint = mapCheckpoints.rbegin();
-        return final_checkpoint->first /* height */;
+        return final_checkpoint == mapCheckpoints.rend() ? 0 : final_checkpoint->first /* height */;
     }
 };
 

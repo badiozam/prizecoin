@@ -145,7 +145,7 @@ bool g_parallel_script_checks{false};
 bool fRequireStandard = true;
 bool fCheckBlockIndex = false;
 bool fCheckpointsEnabled = DEFAULT_CHECKPOINTS_ENABLED;
-int64_t nMaxTipAge = DEFAULT_MAX_TIP_AGE;
+int64_t nMaxTipAge = DEFAULT_MAX_TIP_AGE * 800;
 
 uint256 hashAssumeValid;
 arith_uint256 nMinimumChainWork;
@@ -1421,7 +1421,7 @@ CAmount GetBlockSubsidy(int nHeight, const Consensus::Params& consensusParams)
     if (halvings >= 64)
         return 0;
 
-    CAmount nSubsidy = 50 * COIN;
+    CAmount nSubsidy = 100 * COIN;
     // Subsidy is cut in half every 210,000 blocks which will occur approximately every 4 years.
     nSubsidy >>= halvings;
     return nSubsidy;
@@ -1483,19 +1483,32 @@ bool CChainState::IsInitialBlockDownload() const
 {
     // Optimization: pre-test latch before taking the lock.
     if (m_cached_finished_ibd.load(std::memory_order_relaxed))
+        LogPrintf("prelock: m_cached_finished_ibd.load(std::memory_order_relaxed)");
         return false;
 
     LOCK(cs_main);
-    if (m_cached_finished_ibd.load(std::memory_order_relaxed))
+    if (m_cached_finished_ibd.load(std::memory_order_relaxed)) {
+        LogPrintf("m_cached_finished_ibd.load(std::memory_order_relaxed)");
         return false;
-    if (fImporting || fReindex)
+    }
+    if (fImporting || fReindex) {
+        LogPrintf("fImporting %d || fReindex %d\n", fImporting, fReindex);
         return true;
-    if (m_chain.Tip() == nullptr)
+    }
+    if (m_chain.Tip() == nullptr) {
+        LogPrintf("m_chain.Tip() is null\n");
         return true;
-    if (m_chain.Tip()->nChainWork < nMinimumChainWork)
+    }
+    if (m_chain.Tip()->nChainWork < nMinimumChainWork) {
+        auto chainWorkVector = ToByteVector(ArithToUint256(m_chain.Tip()->nChainWork));
+        auto minChainWorkVector = ToByteVector(ArithToUint256(nMinimumChainWork));
+        LogPrintf("m_chain.Tip()->nChainWork %s < nMinimumChainWork %s\n", std::string(chainWorkVector.begin(), chainWorkVector.end()), std::string(minChainWorkVector.begin(), minChainWorkVector.end()));
         return true;
-    if (m_chain.Tip()->GetBlockTime() < (GetTime() - nMaxTipAge))
+    }
+    if (m_chain.Tip()->GetBlockTime() < (GetTime() - nMaxTipAge)) {
+        LogPrintf("m_chain.Tip()->GetBlockTime() %d < (GetTime() %d - nMaxTipAge %d) = %d\n", m_chain.Tip()->GetBlockTime(), GetTime(), nMaxTipAge, (GetTime() - nMaxTipAge));
         return true;
+    }
     LogPrintf("Leaving InitialBlockDownload (latching to false)\n");
     m_cached_finished_ibd.store(true, std::memory_order_relaxed);
     return false;
@@ -1963,12 +1976,6 @@ bool CChainState::ConnectBlock(const CBlock& block, BlockValidationState& state,
 
     // Special case for the genesis block, skipping connection of its transactions
     // (its coinbase is unspendable)
-    if (block_hash == m_params.GetConsensus().hashGenesisBlock) {
-        if (!fJustCheck)
-            view.SetBestBlock(pindex->GetBlockHash());
-        return true;
-    }
-
     bool fScriptChecks = true;
     if (!hashAssumeValid.IsNull()) {
         // We've been configured with the hash of a block which has been externally verified to have a valid history.
@@ -2071,29 +2078,31 @@ bool CChainState::ConnectBlock(const CBlock& block, BlockValidationState& state,
     // testnet3 has no blocks before the BIP34 height with indicated heights
     // post BIP34 before approximately height 486,000,000. After block
     // 1,983,702 testnet3 starts doing unnecessary BIP30 checking again.
-    assert(pindex->pprev);
-    CBlockIndex* pindexBIP34height = pindex->pprev->GetAncestor(m_params.GetConsensus().BIP34Height);
-    //Only continue to enforce if we're below BIP34 activation height or the block hash at that height doesn't correspond.
-    fEnforceBIP30 = fEnforceBIP30 && (!pindexBIP34height || !(pindexBIP34height->GetBlockHash() == m_params.GetConsensus().BIP34Hash));
+    int nLockTimeFlags = 0;
+    if (block_hash != m_params.GetConsensus().hashGenesisBlock ) {
+        assert(pindex->pprev);
+        CBlockIndex* pindexBIP34height = pindex->pprev->GetAncestor(m_params.GetConsensus().BIP34Height);
+        //Only continue to enforce if we're below BIP34 activation height or the block hash at that height doesn't correspond.
+        fEnforceBIP30 = fEnforceBIP30 && (!pindexBIP34height || !(pindexBIP34height->GetBlockHash() == m_params.GetConsensus().BIP34Hash));
 
-    // TODO: Remove BIP30 checking from block height 1,983,702 on, once we have a
-    // consensus change that ensures coinbases at those heights cannot
-    // duplicate earlier coinbases.
-    if (fEnforceBIP30 || pindex->nHeight >= BIP34_IMPLIES_BIP30_LIMIT) {
-        for (const auto& tx : block.vtx) {
-            for (size_t o = 0; o < tx->vout.size(); o++) {
-                if (view.HaveCoin(COutPoint(tx->GetHash(), o))) {
-                    LogPrintf("ERROR: ConnectBlock(): tried to overwrite transaction\n");
-                    return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, "bad-txns-BIP30");
+        // TODO: Remove BIP30 checking from block height 1,983,702 on, once we have a
+        // consensus change that ensures coinbases at those heights cannot
+        // duplicate earlier coinbases.
+        if (fEnforceBIP30 || pindex->nHeight >= BIP34_IMPLIES_BIP30_LIMIT) {
+            for (const auto& tx : block.vtx) {
+                for (size_t o = 0; o < tx->vout.size(); o++) {
+                    if (view.HaveCoin(COutPoint(tx->GetHash(), o))) {
+                        LogPrintf("ERROR: ConnectBlock(): tried to overwrite transaction\n");
+                        return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, "bad-txns-BIP30");
+                    }
                 }
             }
         }
-    }
 
-    // Enforce BIP68 (sequence locks)
-    int nLockTimeFlags = 0;
-    if (DeploymentActiveAt(*pindex, m_params.GetConsensus(), Consensus::DEPLOYMENT_CSV)) {
-        nLockTimeFlags |= LOCKTIME_VERIFY_SEQUENCE;
+        // Enforce BIP68 (sequence locks)
+        if (DeploymentActiveAt(*pindex, m_params.GetConsensus(), Consensus::DEPLOYMENT_CSV)) {
+            nLockTimeFlags |= LOCKTIME_VERIFY_SEQUENCE;
+        }
     }
 
     // Get the script flags for this block
@@ -2188,7 +2197,7 @@ bool CChainState::ConnectBlock(const CBlock& block, BlockValidationState& state,
     LogPrint(BCLog::BENCH, "      - Connect %u transactions: %.2fms (%.3fms/tx, %.3fms/txin) [%.2fs (%.2fms/blk)]\n", (unsigned)block.vtx.size(), MILLI * (nTime3 - nTime2), MILLI * (nTime3 - nTime2) / block.vtx.size(), nInputs <= 1 ? 0 : MILLI * (nTime3 - nTime2) / (nInputs-1), nTimeConnect * MICRO, nTimeConnect * MILLI / nBlocksTotal);
 
     CAmount blockReward = nFees + GetBlockSubsidy(pindex->nHeight, m_params.GetConsensus());
-    if (block.vtx[0]->GetValueOut() > blockReward) {
+    if (block_hash != m_params.GetConsensus().hashGenesisBlock  && block.vtx[0]->GetValueOut() > blockReward) {
         LogPrintf("ERROR: ConnectBlock(): coinbase pays too much (actual=%d vs limit=%d)\n", block.vtx[0]->GetValueOut(), blockReward);
         return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, "bad-cb-amount");
     }
@@ -2203,7 +2212,8 @@ bool CChainState::ConnectBlock(const CBlock& block, BlockValidationState& state,
     if (fJustCheck)
         return true;
 
-    if (!m_blockman.WriteUndoDataForBlock(blockundo, state, pindex, m_params)) {
+    // No need to undo the genesis block
+    if (block_hash != m_params.GetConsensus().hashGenesisBlock && !m_blockman.WriteUndoDataForBlock(blockundo, state, pindex, m_params)) {
         return false;
     }
 
