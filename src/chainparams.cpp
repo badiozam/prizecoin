@@ -134,7 +134,14 @@ public:
         m_is_test_chain = false;
         m_is_mockable_chain = false;
 
-        checkpointData = {};
+        checkpointData = {
+		{
+			{ 100, "000000007d3b06b1b139ebe99291fc94cbf3ab1e5f38cc513bd8dad4efc9c6a6" },
+			{ 500, "000000006da0642d354f00d30d9b70018374672bdc6320b5ab6602c4ae3ef2de" },
+			{2500, "00000000ceb1f8dbb641844c4a9e6dcbdde560391f332aa169e4133532697005" },
+			{5000, "0000000032f08a898cbecddc2223bd801fafbd61a8174df41643929d1ef79517" },
+		}
+	};
 
         m_assumeutxo_data = MapAssumeutxo{
          // TODO to be specified in a future patch.
